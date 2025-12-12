@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Search as SearchIcon } from 'lucide-react';
 
 import { NovelCard } from '@/components/novel-card';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAppStore } from '@/store';
 import { Plugin } from '@/types/plugin';
+import { searchCache } from '@/lib/cache';
 
 type SearchNovelsSectionProps = {
   onNavigateToParseNovel?: () => void;
@@ -25,12 +26,30 @@ export default function SearchNovelsSection({
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState('');
 
-  const fetchNovels = async (page: number) => {
-    if (plugin && searchTerm.trim()) {
+  // Debounced search function
+  const fetchNovels = useCallback(
+    async (term: string, page: number) => {
+      if (!plugin || !term.trim()) {
+        return;
+      }
+
+      // Check cache first
+      const cacheKey = `search:${plugin.id}:${term}:${page}`;
+      const cached = searchCache.get<Plugin.NovelItem[]>(cacheKey);
+      if (cached) {
+        setNovels(cached);
+        setCurrentPage(page);
+        return;
+      }
+
       setLoading(true);
       setFetchError('');
       try {
-        const results = await plugin.searchNovels(searchTerm, page);
+        const results = await plugin.searchNovels(term, page);
+
+        // Cache results for 5 minutes
+        searchCache.set(cacheKey, results, 5 * 60 * 1000);
+
         setNovels(results);
         setCurrentPage(page);
       } catch (error) {
@@ -41,21 +60,45 @@ export default function SearchNovelsSection({
       } finally {
         setLoading(false);
       }
+    },
+    [plugin],
+  );
+
+  // Debounce search input
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setNovels([]);
+      setCurrentPage(1);
+      return;
     }
-  };
+
+    const timeoutId = setTimeout(() => {
+      fetchNovels(searchTerm, 1);
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, fetchNovels]);
 
   useEffect(() => {
     setCurrentPage(1);
     setNovels([]);
     setSearchTerm('');
     setFetchError('');
+    // Clear cache when plugin changes
+    searchCache.clear();
   }, [plugin]);
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && searchTerm.trim()) {
-      fetchNovels(1);
+      fetchNovels(searchTerm, 1);
     }
   };
+
+  const handleNextPage = useCallback(() => {
+    if (searchTerm.trim()) {
+      fetchNovels(searchTerm, currentPage + 1);
+    }
+  }, [searchTerm, currentPage, fetchNovels]);
 
   const handleParseNovel = (path: string) => {
     setParseNovelPath(path, true);
@@ -91,14 +134,14 @@ export default function SearchNovelsSection({
             disabled={!plugin}
           />
           <Button
-            onClick={() => fetchNovels(1)}
+            onClick={() => fetchNovels(searchTerm, 1)}
             disabled={!plugin || !searchTerm.trim() || loading}
           >
             {loading ? 'Searching...' : 'Search'}
           </Button>
           <Button
             variant="outline"
-            onClick={() => fetchNovels(currentPage + 1)}
+            onClick={handleNextPage}
             disabled={!plugin || novels.length === 0 || loading}
           >
             Next Page

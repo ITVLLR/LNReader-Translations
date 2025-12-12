@@ -70,13 +70,20 @@ export default function PopularNovelsSection({
 
     if (plugin?.filters) {
       const filters: FilterToValues<typeof plugin.filters> = {};
+      // Ensure all filters are initialized
       for (const fKey in plugin.filters) {
-        filters[fKey as keyof typeof filters] = {
-          type: plugin.filters[fKey].type,
-          value: plugin.filters[fKey].value,
-        };
+        const filter = plugin.filters[fKey];
+        if (filter) {
+          filters[fKey as keyof typeof filters] = {
+            type: filter.type,
+            value: filter.value,
+          };
+        }
       }
       setFilterValues(filters);
+    } else {
+      // Clear filter values when plugin has no filters
+      setFilterValues(undefined);
     }
   }, [plugin]);
 

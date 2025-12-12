@@ -23,6 +23,8 @@ npm run clean:multisrc
 npm run build:multisrc
 echo "Compiling TypeScript..."
 npx tsc --project tsconfig.production.json
+echo "Bundling translation code into plugins..."
+npm run build:bundle-translation
 npm run build:manifest
 
 if (-not (Test-Path .dist) -or -not (Get-ChildItem -Path .dist -Force)) {

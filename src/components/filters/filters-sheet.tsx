@@ -43,8 +43,8 @@ const renderFilters = (
   return (
     <>
       {Object.entries(filters).map(([key, filter]) => {
-        if (!(key in values)) {
-          console.error(`No filter value for ${key} in filter values!`);
+        if (!values || !(key in values)) {
+          // Skip rendering if values are not initialized yet
           return null;
         }
         switch (filter.type) {

@@ -84,6 +84,8 @@ npm run clean:multisrc
 npm run build:multisrc
 echo "Compiling TypeScript..."
 npx tsc --project tsconfig.production.json
+echo "Bundling translation code into plugins..."
+npm run build:bundle-translation
 npm run build:manifest
 
 if [ ! -d ".dist" ] || [ -z "$(ls -A .dist)" ]; then

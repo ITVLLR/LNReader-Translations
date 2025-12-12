@@ -20,7 +20,7 @@ const makeInit = async (init?: FetchInit) => {
     'Accept': '*/*',
     'Accept-Language': '*',
     'Sec-Fetch-Mode': 'cors',
-    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Encoding': 'gzip, deflate, br', // Added br for better compression
   };
   if (init?.headers) {
     if (init.headers instanceof Headers) {
@@ -43,15 +43,82 @@ const makeInit = async (init?: FetchInit) => {
 };
 
 /**
- * Fetch with (Android) User Agent
+ * Retry logic for failed requests
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  maxRetries: number = 3,
+  retryDelay: number = 1000,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      const response = await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      // Retry on server errors (5xx) but not on client errors (4xx)
+      if (!response.ok && response.status >= 500 && attempt < maxRetries - 1) {
+        await new Promise(resolve =>
+          setTimeout(resolve, retryDelay * (attempt + 1)),
+        );
+        continue;
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on abort (timeout) or if it's the last attempt
+      if (lastError.name === 'AbortError' || attempt === maxRetries - 1) {
+        throw lastError;
+      }
+
+      // Wait before retrying
+      await new Promise(resolve =>
+        setTimeout(resolve, retryDelay * (attempt + 1)),
+      );
+    }
+  }
+
+  throw lastError || new Error('Request failed after retries');
+}
+
+/**
+ * Fetch API for plugin operations (novel search, chapter fetching, etc.)
+ * NOTE: This does NOT use rotating User-Agents - those are ONLY for translation requests
+ * Includes automatic retry logic and better error handling
  * @param url
  * @param init
+ * @param options Optional: cacheKey for caching, skipRetry to disable retry logic
  * @returns response as normal fetch
  */
-export async function fetchApi(url: string, init?: FetchInit) {
+export async function fetchApi(
+  url: string,
+  init?: FetchInit,
+  options?: { cacheKey?: string; skipRetry?: boolean },
+): Promise<Response> {
   init = await makeInit(init);
-  console.log(url, init);
-  return await fetch(url, init as RequestInit);
+
+  // Only log in development
+  if (process.env.NODE_ENV === 'development') {
+    console.log(url, init);
+  }
+
+  // Use retry logic unless explicitly disabled
+  if (options?.skipRetry) {
+    return await fetch(url, init as RequestInit);
+  }
+
+  return await fetchWithRetry(url, init as RequestInit);
 }
 
 /**

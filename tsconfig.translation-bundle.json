@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES5",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@libs/*": [
+        "./src/libs/*"
+      ]
+    },
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./.js/translation-temp",
+    "allowJs": true
+  },
+  "include": [
+    "src/libs/translation.ts",
+    "src/translation/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

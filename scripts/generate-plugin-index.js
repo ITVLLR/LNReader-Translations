@@ -6,7 +6,14 @@ let pluginCounter = 0;
 const PLUGIN_DIR = 'plugins';
 
 fs.readdirSync(PLUGIN_DIR)
-  .filter(f => !f.includes('index') && f !== 'multisrc')
+  .filter(f => {
+    const fullPath = PLUGIN_DIR + '/' + f;
+    return (
+      !f.includes('index') &&
+      f !== 'multisrc' &&
+      fs.statSync(fullPath).isDirectory()
+    );
+  })
   .forEach(langName => {
     const LANG_DIR = PLUGIN_DIR + '/' + langName;
     fs.readdirSync(LANG_DIR)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, FileText, Code } from 'lucide-react';
+import { Copy, FileText, Code, Languages, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -8,12 +8,21 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useAppStore } from '@/store';
 import { usePluginCustomAssets } from '@/hooks/usePluginCustomAssets';
+import { useTranslation } from '@/hooks/useTranslation';
+import { chapterCache } from '@/lib/cache';
 
 export default function ParseChapterSection() {
   const plugin = useAppStore(state => state.plugin);
@@ -33,21 +42,69 @@ export default function ParseChapterSection() {
   const { customCSSLoaded, customJSLoaded, customCSSError, customJSError } =
     usePluginCustomAssets(plugin, chapterText);
 
+  const {
+    translate,
+    isTranslating,
+    translatedText,
+    targetLanguage,
+    setTargetLanguage,
+    isTranslated,
+    resetTranslation,
+    useMultipleEngines,
+    setUseMultipleEngines,
+    autoTranslate,
+    setAutoTranslate,
+    cacheStats,
+    clearCache,
+    SUPPORTED_LANGUAGES,
+    availableEngines,
+  } = useTranslation();
+
   const fetchChapterByPath = async (path: string) => {
-    if (plugin && path.trim()) {
-      setLoading(true);
-      setFetchError('');
-      try {
-        const result = await plugin.parseChapter(path);
-        setChapterText(result);
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Failed to fetch chapter';
-        setFetchError(errorMessage);
-        console.error('Error parsing chapter:', error);
-      } finally {
-        setLoading(false);
+    if (!plugin || !path.trim()) {
+      return;
+    }
+
+    // Check cache first
+    const cacheKey = `chapter:${plugin.id}:${path}`;
+    const cached = chapterCache.get<string>(cacheKey);
+    if (cached) {
+      setChapterText(cached);
+      resetTranslation();
+      // Auto-translate cached content
+      if (cached.trim()) {
+        setTimeout(() => {
+          translate(cached, targetLanguage, true);
+        }, 50); // Reduced delay
       }
+      return;
+    }
+
+    setLoading(true);
+    setFetchError('');
+    try {
+      const result = await plugin.parseChapter(path);
+
+      // Cache chapter content for 10 minutes
+      chapterCache.set(cacheKey, result, 10 * 60 * 1000);
+
+      setChapterText(result);
+      resetTranslation(); // Resetear traducción al cargar nuevo capítulo
+
+      // Always auto-translate
+      if (result.trim()) {
+        // Reduced delay for better UX
+        setTimeout(() => {
+          translate(result, targetLanguage, true); // Silent translation
+        }, 50);
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to fetch chapter';
+      setFetchError(errorMessage);
+      console.error('Error parsing chapter:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -191,7 +248,7 @@ export default function ParseChapterSection() {
                   {chapterPath}
                 </p>
               </div>
-              <div className="flex gap-2 items-center">
+              <div className="flex gap-2 items-center flex-wrap">
                 <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg bg-muted/50">
                   <Code className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">
@@ -202,6 +259,86 @@ export default function ParseChapterSection() {
                     onCheckedChange={setShowRawHtml}
                   />
                 </div>
+                {chapterText && (
+                  <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg bg-muted/50 flex-wrap">
+                    <Languages className="w-4 h-4 text-muted-foreground" />
+                    <Select
+                      value={targetLanguage}
+                      onValueChange={lang => {
+                        setTargetLanguage(lang);
+                        // If auto-translate is enabled, retranslate immediately
+                        if (autoTranslate && chapterText) {
+                          translate(chapterText, lang, true);
+                        }
+                      }}
+                      disabled={isTranslating}
+                    >
+                      <SelectTrigger className="h-8 w-[140px] border-0 bg-transparent p-0 shadow-none">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SUPPORTED_LANGUAGES.map(lang => (
+                          <SelectItem key={lang.code} value={lang.code}>
+                            {lang.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-1 px-2 py-1 rounded bg-background/50">
+                      <span className="text-xs text-muted-foreground">
+                        {useMultipleEngines
+                          ? `${availableEngines.length} motores`
+                          : availableEngines[0]?.alias || '1 motor'}
+                      </span>
+                      <Switch
+                        checked={useMultipleEngines}
+                        onCheckedChange={setUseMultipleEngines}
+                        disabled={isTranslating}
+                        className="h-4 w-7"
+                      />
+                    </div>
+                    {chapterText && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1 bg-transparent"
+                            onClick={() => {
+                              if (isTranslated) {
+                                resetTranslation();
+                              } else {
+                                translate(chapterText, targetLanguage, true);
+                              }
+                            }}
+                            disabled={isTranslating}
+                          >
+                            {isTranslated ? (
+                              <>
+                                <RotateCcw className="w-3 h-3" />
+                                Original
+                              </>
+                            ) : (
+                              <>
+                                <Languages className="w-3 h-3" />
+                                {isTranslating
+                                  ? 'Traduciendo...'
+                                  : 'Ver Traducido'}
+                              </>
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>
+                            {isTranslated
+                              ? 'Ver texto original'
+                              : 'Ver texto traducido'}
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -227,7 +364,12 @@ export default function ParseChapterSection() {
                       size="sm"
                       className="gap-2 bg-transparent"
                       onClick={() =>
-                        copyToClipboard(chapterText, 'Chapter text')
+                        copyToClipboard(
+                          isTranslated && translatedText
+                            ? translatedText
+                            : chapterText,
+                          'Chapter text',
+                        )
                       }
                     >
                       <Copy className="w-4 h-4" />
@@ -251,13 +393,18 @@ export default function ParseChapterSection() {
               <div className="bg-background rounded-b-lg p-6 max-h-[600px] overflow-y-auto">
                 {showRawHtml ? (
                   <pre className="text-xs text-foreground font-mono whitespace-pre-wrap break-words">
-                    {chapterText}
+                    {isTranslated && translatedText
+                      ? translatedText
+                      : chapterText}
                   </pre>
                 ) : (
                   <div
                     className="prose prose-sm dark:prose-invert max-w-none text-foreground"
                     dangerouslySetInnerHTML={{
-                      __html: chapterText,
+                      __html:
+                        isTranslated && translatedText
+                          ? translatedText
+                          : chapterText,
                     }}
                   />
                 )}
@@ -269,6 +416,21 @@ export default function ParseChapterSection() {
                 <p className="text-sm text-muted-foreground">
                   Content loaded successfully
                 </p>
+                {cacheStats.size > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-xs px-2 py-1 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 cursor-help">
+                        Caché: {cacheStats.size}/{cacheStats.maxSize}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>
+                        {cacheStats.size} traducciones en caché. Haz clic para
+                        limpiar.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 {plugin?.customCSS && (
                   <span
                     className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
@@ -306,17 +468,37 @@ export default function ParseChapterSection() {
                   </span>
                 )}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setChapterText('');
-                  setChapterPath('');
-                  setShowRawHtml(false);
-                }}
-              >
-                Clear
-              </Button>
+              <div className="flex gap-2">
+                {cacheStats.size > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={clearCache}
+                        className="text-xs"
+                      >
+                        Limpiar Caché
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Eliminar todas las traducciones en caché</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setChapterText('');
+                    setChapterPath('');
+                    setShowRawHtml(false);
+                    resetTranslation();
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
             </div>
           </div>
         ) : null}
