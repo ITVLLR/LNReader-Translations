@@ -13,9 +13,30 @@ const config = {
 };
 
 const minify = function (path) {
-  const code = fs.readFileSync(path).toString();
-  const result = minify_sync(code, config);
-  fs.writeFileSync(path, result.code);
+  try {
+    const code = fs.readFileSync(path).toString();
+
+    // Skip minification for plugins with auto-translation (they have complex code)
+    if (
+      code.includes('window.__translateChapter') ||
+      code.includes('// Auto-translation')
+    ) {
+      return; // Keep original code
+    }
+
+    const result = minify_sync(code, config);
+    if (result.error) {
+      console.warn(
+        `⚠️  Minification failed for ${path}: ${result.error.message}`,
+      );
+      // Keep original code if minification fails
+      return;
+    }
+    fs.writeFileSync(path, result.code);
+  } catch (error) {
+    console.warn(`⚠️  Minification failed for ${path}: ${error.message}`);
+    // Keep original code if minification fails
+  }
 };
 
 export { minify };

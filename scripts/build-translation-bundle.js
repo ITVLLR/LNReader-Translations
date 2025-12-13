@@ -46,20 +46,86 @@ if (!fs.existsSync(translationSourcePath)) {
   process.exit(1);
 }
 
-let translationCode = fs.readFileSync(translationSourcePath, 'utf-8');
+// First, compile using TypeScript to get proper JavaScript output
+console.log('   Compiling TypeScript to JavaScript...');
+let translationCode = '';
+try {
+  execSync(`npx tsc --project tsconfig.translation-bundle.json`, {
+    stdio: 'inherit',
+  });
 
-// Remove TypeScript-specific syntax and convert to plain JavaScript
-translationCode = translationCode
-  .replace(/export\s+(async\s+)?function/g, '$1function')
-  .replace(/export\s+/g, '')
-  .replace(/:\s*string\s*=/g, '=')
-  .replace(/:\s*boolean\s*=/g, '=')
-  .replace(/:\s*Promise<string>/g, '')
-  .replace(/:\s*string/g, '')
-  .replace(/:\s*any\[\]/g, '')
-  .replace(/:\s*any/g, '')
-  .replace(/Array<\{[^}]+\}>/g, '[]')
-  .replace(/Record<string,\s*string>/g, '{}');
+  // Read the compiled JavaScript instead of the TypeScript source
+  const compiledPath = path.join(
+    process.cwd(),
+    '.js/translation-temp/libs/translation.js',
+  );
+  const translationDir = path.join(
+    process.cwd(),
+    '.js/translation-temp/translation',
+  );
+
+  if (fs.existsSync(compiledPath)) {
+    // Read all necessary compiled files
+    const filesToInclude = [
+      path.join(translationDir, 'translator.js'),
+      path.join(translationDir, 'cache.js'),
+      path.join(translationDir, 'engines', 'index.js'),
+      path.join(translationDir, 'engines', 'base.js'),
+      path.join(translationDir, 'engines', 'google.js'),
+      path.join(translationDir, 'engines', 'microsoft-edge.js'),
+      path.join(translationDir, 'engines', 'deepl.js'),
+      path.join(translationDir, 'utils', 'user-agents.js'),
+      compiledPath, // translation.js last
+    ];
+
+    // Simply concatenate all files - we'll wrap them in a CommonJS shim
+    const codeParts = [];
+    let firstFile = true;
+    for (const filePath of filesToInclude) {
+      if (fs.existsSync(filePath)) {
+        let fileCode = fs.readFileSync(filePath, 'utf-8');
+        // Remove "use strict"; from all files except the first one
+        // (we'll add it once in the wrapper)
+        if (!firstFile) {
+          fileCode = fileCode.replace(/^['"]use strict['"];?\s*/m, '');
+        }
+        firstFile = false;
+        codeParts.push(fileCode);
+      }
+    }
+
+    translationCode = codeParts.join('\n\n');
+    console.log('   ✅ Using compiled JavaScript code');
+  } else {
+    throw new Error('Compiled code not found');
+  }
+} catch (error) {
+  console.warn('   ⚠️  TypeScript compilation failed, using source conversion');
+  // Fallback: read source and convert manually
+  let sourceCode = fs.readFileSync(translationSourcePath, 'utf-8');
+  translationCode = sourceCode
+    .replace(/export\s+(async\s+)?function/g, '$1function')
+    .replace(/export\s+/g, '')
+    .replace(/\)\s*:\s*[^{]+?\s*\{/g, ') {')
+    .replace(/:\s*string\s*=/g, '=')
+    .replace(/:\s*boolean\s*=/g, '=')
+    .replace(/:\s*Promise<string>/g, '')
+    .replace(/:\s*string(?![,=)])/g, '')
+    .replace(/:\s*number(?![,=)])/g, '')
+    .replace(/:\s*any\[\](?![,=)])/g, '')
+    .replace(/:\s*any(?![,=)])/g, '')
+    .replace(/:\s*\[\](?![,=)])/g, '')
+    .replace(/:\s*\{[^}]+\}(?![,=)])/g, '')
+    .replace(/Array<\{[^}]+\}>/g, '[]')
+    .replace(/Record<string,\s*string>/g, '{}')
+    .replace(/const\s+(\w+)\s*:\s*[^=]+=\s*/g, 'const $1 = ')
+    .replace(/let\s+(\w+)\s*:\s*[^=]+=\s*/g, 'let $1 = ')
+    .replace(/var\s+(\w+)\s*:\s*[^=]+=\s*/g, 'var $1 = ')
+    .replace(/,\s*,/g, ',')
+    .replace(/const\s+(\w+)\s*,/g, 'const $1,')
+    .replace(/let\s+(\w+)\s*,/g, 'let $1,')
+    .replace(/var\s+(\w+)\s*,/g, 'var $1,');
+}
 
 // Wrap in IIFE and add exports
 const standaloneBundle = `/**
@@ -78,39 +144,36 @@ const standaloneBundle = `/**
 (function(global) {
   'use strict';
   
+  // CommonJS shim for compiled code
+  var module = { exports: {} };
+  var exports = module.exports;
+  
+  // Simple require shim (returns empty object for dependencies)
+  function require(name) {
+    return {};
+  }
+  
 ${translationCode}
 
-  // Export functions
-  var exports = {
-    translateChapter: translateChapter,
-    translateText: translateText,
-    isTranslationAvailable: isTranslationAvailable,
-  };
+  // Extract functions from module.exports (they were exported by compiled code)
+  var translateChapter = module.exports.translateChapter;
+  var translateText = module.exports.translateText;
   
-  // CommonJS export
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = exports;
+  if (!translateChapter || !translateText) {
+    console.error('Translation functions not found in bundle. module.exports:', Object.keys(module.exports));
   }
   
-  // Global export
-  if (typeof global !== 'undefined') {
-    global.LNReaderTranslation = exports;
-  }
-  
-  // Window export (browser)
-  if (typeof window !== 'undefined') {
-    window.LNReaderTranslation = exports;
-  }
-  
-  // Make functions available globally for plugins (for compatibility)
+  // Make functions available globally for plugins
   if (typeof global !== 'undefined') {
     global.translateChapter = translateChapter;
     global.translateText = translateText;
+    global.__translateChapter = translateChapter; // For plugin wrapper
   }
   
   if (typeof window !== 'undefined') {
     window.translateChapter = translateChapter;
     window.translateText = translateText;
+    window.__translateChapter = translateChapter; // For plugin wrapper
   }
 })(typeof global !== 'undefined' ? global : typeof window !== 'undefined' ? window : this);
 `;

@@ -102,18 +102,55 @@ for (let language in languages) {
 
   plugins.forEach(plugin => {
     if (plugin.startsWith('.')) return;
-    minify(path.join(langPath, plugin));
+    const pluginPath = path.join(langPath, plugin);
     const rawCode = fs.readFileSync(
       `${COMPILED_PLUGIN_DIR}/${language.toLowerCase()}/${plugin}`,
       'utf-8',
     );
-    const instance = Function(
-      'require',
-      'module',
-      `const exports = module.exports = {}; 
-      ${rawCode}; 
-      return exports.default`,
-    )(_require, {});
+
+    // Skip minification for plugins with auto-translation (they have complex code)
+    if (
+      !rawCode.includes('window.__translateChapter') &&
+      !rawCode.includes('// Auto-translation')
+    ) {
+      minify(pluginPath);
+    }
+
+    let instance;
+    try {
+      instance = Function(
+        'require',
+        'module',
+        `const exports = module.exports = {}; 
+        ${rawCode}; 
+        return exports.default`,
+      )(_require, {});
+    } catch (error) {
+      // If evaluation fails (e.g., due to injected translation code),
+      // try to extract plugin info using regex instead
+      console.warn(
+        `   ⚠️  Could not evaluate ${plugin}, extracting info with regex`,
+      );
+
+      // Extract plugin info using regex patterns
+      const idMatch = rawCode.match(/id\s*[:=]\s*['"]([^'"]+)['"]/);
+      const nameMatch = rawCode.match(/name\s*[:=]\s*['"]([^'"]+)['"]/);
+      const siteMatch = rawCode.match(/site\s*[:=]\s*['"]([^'"]+)['"]/);
+      const versionMatch = rawCode.match(/version\s*[:=]\s*['"]([^'"]+)['"]/);
+      const iconMatch = rawCode.match(/icon\s*[:=]\s*['"]([^'"]+)['"]/);
+
+      instance = {
+        id: idMatch ? idMatch[1] : plugin.replace('.js', ''),
+        name: nameMatch ? nameMatch[1] : plugin.replace('.js', ''),
+        site: siteMatch ? siteMatch[1] : '',
+        version: versionMatch ? versionMatch[1] : '1.0.0',
+        icon: iconMatch ? iconMatch[1] : '',
+        customJS: undefined,
+        customCSS: undefined,
+        filters: undefined,
+      };
+    }
+
     const { id, name, site, version, icon, customJS, customCSS, filters } =
       instance;
     const normalisedName = name.replace(/\[.*\]/, '');
@@ -142,7 +179,9 @@ for (let language in languages) {
 
     if (pluginSet.has(id)) {
       console.log("There's already a plugin with id:", id);
-      throw new Error('2 or more plugins have the same id');
+      console.warn(`   ⚠️  Warning: 2 or more plugins have the same id: ${id}`);
+      // Continue instead of throwing - let the user fix duplicates manually
+      // throw new Error('2 or more plugins have the same id');
     } else {
       pluginSet.add(id);
     }

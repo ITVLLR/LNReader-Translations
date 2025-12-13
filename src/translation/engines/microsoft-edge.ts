@@ -1,5 +1,6 @@
 import { BaseEngine } from './base';
 import { MICROSOFT_LANGUAGES } from './microsoft';
+import { userAgentRotator } from '../utils/user-agents';
 
 /**
  * Microsoft Edge Translator (Free)

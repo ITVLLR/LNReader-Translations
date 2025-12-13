@@ -16,6 +16,7 @@ export interface TranslationConfig {
   requestInterval?: number;
   concurrencyLimit?: number;
   maxErrorCount?: number;
+  region?: string; // For Microsoft Translator API
 }
 
 export interface Language {
@@ -132,8 +133,11 @@ export abstract class BaseEngine {
    * Get headers for the API request
    * Uses rotating User-Agents ONLY for translation requests to avoid rate limits
    * This ensures User-Agents are not used for novel searches or other plugin operations
+   * Can be overridden to return a Promise for async operations
    */
-  protected getHeaders(): Record<string, string> {
+  protected getHeaders():
+    | Record<string, string>
+    | Promise<Record<string, string>> {
     // Only use rotating User-Agents for translation engines
     // This method is ONLY called by translation engines, not by plugin fetchApi calls
     const baseHeaders = userAgentRotator.getNextHeaders();
